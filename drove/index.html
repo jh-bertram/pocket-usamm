@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>DROVE · USAMM in motion</title>
+<meta name="description" content="DROVE — the USAMM flyers, un-frozen. Modeled livestock movement as a living, touchable network.">
+<meta name="theme-color" content="#0d1410">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="DROVE">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d1410'/%3E%3Ccircle cx='20' cy='32' r='7' fill='%236fa05e'/%3E%3Ccircle cx='46' cy='18' r='4' fill='%23d8b53f'/%3E%3Ccircle cx='48' cy='40' r='4' fill='%23cfe8c0'/%3E%3Cpath d='M26 29Q36 20 43 19M26 34Q38 40 45 39' stroke='%233b6b3a' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+/* ============ DROVE — dark-mode-first, single deliberate look ============ */
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+html,body{height:100%;overscroll-behavior:none}
+body{
+  background:#0d1410;color:#cfe0c6;overflow:hidden;
+  font-family:-apple-system,system-ui,"Segoe UI",Helvetica,Arial,sans-serif;
+  -webkit-user-select:none;user-select:none;
+}
+#stage{position:fixed;inset:0}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#vignette{position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(ellipse at 50% 42%, transparent 55%, rgba(0,0,0,.42) 100%)}
+
+/* county lens — a compact FRAME snug around the county map, sliding in from
+   the left over the still-running scene */
+#lensLayer{position:absolute;left:14px;top:50%;width:min(80vw,390px);z-index:7;
+  background:linear-gradient(120deg,#111a10,#0d140f);border:1px solid #33472e;
+  border-radius:16px;box-shadow:10px 12px 44px rgba(0,0,0,.55);
+  transform:translate(calc(-100% - 20px),-50%);visibility:hidden;
+  transition:transform .34s cubic-bezier(.2,.7,.3,1),visibility 0s .34s;
+  display:flex;flex-direction:column;padding:12px 14px 12px}
+#lensLayer.on{transform:translate(0,-50%);visibility:visible;
+  transition:transform .34s cubic-bezier(.2,.7,.3,1),visibility 0s 0s}
+#lensLayer .lenshead{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+#lensLayer .lenshead h3{font-size:13px;color:#a9d194;flex:1;font-weight:700}
+#lensX{width:30px;height:30px;border-radius:50%;background:#20301d;border:0;color:#b7cbac;
+  font-size:14px;font-weight:700;cursor:pointer;position:relative}
+#lensX::after{content:"";position:absolute;inset:-8px}
+#lensLayer .well{background:#f5f6f2;border-radius:14px;padding:8px;position:relative;width:100%}
+#lensLayer img{display:block;width:100%;height:auto;border-radius:8px;min-height:120px;
+  transition:opacity .3s ease}
+#lensLayer .lenscap{font-size:11px;color:#5f6b5c;padding:6px 4px 2px;text-align:center}
+#lensLayer .lensload{position:absolute;inset:8px;border-radius:8px;display:flex;align-items:center;
+  justify-content:center;color:#5f6b5c;font-size:13px;background:#e9ece4}
+.fadeable{transition:opacity .5s ease}
+
+/* ---------------- labels ride nodes ---------------- */
+#labels{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.nl{position:absolute;left:0;top:0;will-change:transform;white-space:nowrap;
+  transform:translate3d(-50%,-50%,0);text-align:center;transition:opacity .3s ease}
+.nl .ab{font-weight:800;font-size:11px;letter-spacing:.06em;color:#e6f0dd;
+  text-shadow:0 1px 6px rgba(0,0,0,.8);transition:color .25s ease}
+.nl.queued .ab{color:#71856b}   /* re-rank queue: gray until this row sorts itself */
+.nl .full{font-size:10px;color:#9db593;display:block;margin-top:1px;opacity:0;transition:opacity .25s ease}
+.nl.settled .full{opacity:1}
+.nl .rk{display:none;color:#7e9476;font-weight:700;margin-right:4px}
+#labels.rank .nl:not(.hub){transform-origin:left center;text-align:left}
+#labels.rank .nl:not(.hub) .rk{display:inline}
+.nl.hub .ab{font-size:14px;color:#fff}
+.nl.dim{opacity:.35}
+
+/* tap-to-tag chip */
+#tagChip{position:absolute;pointer-events:none;background:rgba(10,18,10,.95);border:1px solid #2c3d2a;
+  border-radius:10px;padding:7px 10px;font-size:12px;line-height:1.5;color:#dcead2;
+  transform:translate(-50%,-130%);opacity:0;transition:opacity .18s ease;max-width:230px;
+  white-space:normal;z-index:9}
+#tagChip.below{transform:translate(-50%,18px)}
+#tagChip.on{opacity:1}
+#tagChip b{color:#fff}
+
+/* ---------------- top chrome ---------------- */
+#topbar{position:absolute;left:0;right:0;top:0;padding:calc(8px + env(safe-area-inset-top)) 12px 6px;
+  display:flex;align-items:flex-start;gap:10px;pointer-events:none;z-index:5}
+#stateName{font-size:clamp(20px,5.5vw,30px);font-weight:800;letter-spacing:-.01em;color:#f2f7ee;
+  text-shadow:0 2px 14px rgba(0,0,0,.7)}
+#capChip{margin-top:3px;font-size:11px;color:#9db593}
+#capChip .warn{color:#d8b53f}
+#statChips{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+.schip{background:rgba(20,32,18,.75);border:1px solid #263722;border-radius:8px;
+  padding:3px 8px;font-size:11px;color:#b7cbac}
+.schip b{color:#e9f2e2;font-variant-numeric:tabular-nums}
+#topRight{margin-left:auto;text-align:right;pointer-events:auto}
+#legendChip{font-size:10.5px;color:#8ba382;line-height:1.5;background:rgba(20,32,18,.75);
+  border:1px solid #263722;border-radius:8px;padding:5px 8px}
+#legendChip b{color:#d8e6cf}
+#aboutBtn{margin-top:6px;background:rgba(20,32,18,.85);border:1px solid #2c3d2a;color:#b7cbac;
+  border-radius:999px;padding:5px 11px;font-size:11px;font-weight:600;cursor:pointer}
+#aboutBtn:active{background:#243422}
+
+/* state shelf */
+#shelf{position:absolute;left:0;right:0;top:calc(114px + env(safe-area-inset-top));z-index:5;
+  display:flex;gap:7px;overflow-x:auto;padding:6px 12px;scroll-snap-type:x proximity;
+  -webkit-overflow-scrolling:touch;scrollbar-width:none}
+#shelf::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;scroll-snap-align:center;background:rgba(22,34,20,.8);border:1px solid #263722;
+  color:#a9bfa0;border-radius:999px;padding:7px 13px;font-size:12.5px;font-weight:650;cursor:pointer;
+  transition:transform .12s ease,background .2s,color .2s,border-color .2s;min-height:34px}
+.chip:active{transform:scale(.94)}
+.chip.on{background:#2e4a2b;border-color:#4c7a44;color:#fff;box-shadow:0 0 14px rgba(111,160,94,.35)}
+.chip.on.gold{background:#5c4d14;border-color:#d8b53f;box-shadow:0 0 14px rgba(216,181,63,.35)}
+
+/* ---------------- control dock ---------------- */
+#dock{position:absolute;left:0;right:0;bottom:0;z-index:6;
+  padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+  display:flex;align-items:flex-end;gap:10px;
+  background:linear-gradient(to top, rgba(7,11,7,.92) 60%, transparent);pointer-events:none}
+#dock > *{pointer-events:auto}
+.ctl-label{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:#7e9476;text-align:center;margin-top:4px}
+
+/* layout knob */
+#knobWrap{width:74px;flex:0 0 auto}
+#knob{width:64px;height:64px;margin:0 auto;border-radius:50%;position:relative;cursor:grab;
+  background:radial-gradient(circle at 35% 30%, #2a3d26, #141f12 70%);
+  border:1.5px solid #33472e;box-shadow:0 4px 14px rgba(0,0,0,.5), inset 0 1px 2px rgba(255,255,255,.08);
+  touch-action:none}
+#knob .pointer{position:absolute;left:50%;top:5px;width:4px;height:15px;border-radius:2px;
+  background:#d8e6cf;transform-origin:50% 27px;transform:translateX(-50%) rotate(var(--rot,-40deg));
+  box-shadow:0 0 6px rgba(216,230,207,.5)}
+#knobWrap .detent{position:absolute;font-size:8.5px;font-weight:700;color:#7e9476;letter-spacing:.04em}
+#knobWrap .detent.on{color:#e9f2e2}
+#knobWrap .d-map{left:-6px;top:-11px}#knobWrap .d-rank{right:-9px;top:-11px}
+#knobWrap{position:relative}
+
+/* flow switch */
+#flowWrap{width:86px;flex:0 0 auto}
+#flow{position:relative;width:84px;height:34px;border-radius:999px;background:#141f12;
+  border:1.5px solid #33472e;cursor:pointer;touch-action:none}
+#flow .cap{position:absolute;top:2px;left:2px;width:40px;height:27px;border-radius:999px;
+  background:linear-gradient(#3f5c39,#2a4026);box-shadow:0 2px 6px rgba(0,0,0,.5);
+  transform:translateX(var(--x,0px));display:flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:800;color:#e9f2e2;letter-spacing:.05em}
+#flow.locked{opacity:.45}
+#flow.locked .cap{background:#232d21;color:#7e9476}
+
+/* commodity capsule */
+#catWrap{flex:0 0 auto}
+#cats{position:relative;display:grid;grid-template-columns:repeat(4,1fr);background:#141f12;
+  border:1.5px solid #33472e;border-radius:12px;padding:3px;gap:0;min-width:176px}
+#cats .pill{position:absolute;top:3px;bottom:3px;left:3px;width:calc(25% - 1.5px);border-radius:9px;
+  background:#3f5c39;transition:transform .28s cubic-bezier(.3,.9,.35,1.1), background .28s;
+  box-shadow:0 0 12px rgba(111,160,94,.3)}
+#cats.gold .pill{background:#8a6d14;box-shadow:0 0 12px rgba(216,181,63,.4)}
+#cats button{position:relative;z-index:1;background:none;border:0;color:#8ba382;font:inherit;
+  font-size:11px;font-weight:700;padding:8px 2px;cursor:pointer;border-radius:9px;min-height:34px}
+#cats button.on{color:#fff}
+#cats button.na{color:#57654f;text-decoration:line-through}
+
+/* season arc + faucet column */
+#rightCol{margin-left:auto;flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+#seasonWrap{position:relative}
+#season{display:flex;gap:4px;background:#141f12;border:1.5px solid #33472e;border-radius:12px;padding:3px}
+#season button{background:none;border:0;color:#8ba382;font:inherit;font-size:10.5px;font-weight:700;
+  padding:6px 8px 7px;border-radius:8px;cursor:pointer;min-height:38px;position:relative;
+  display:flex;flex-direction:column;align-items:center;justify-content:flex-end}
+#season button::after{content:"";position:absolute;left:0;right:0;top:-4px;bottom:-4px}
+/* At rest each quarter shows a 2px pip — a deliberate hover indicator — and
+   the PEAK quarter carries a solid full-width line. Hovering the box morphs
+   it taller: the pips grow into real quarterly-share bars (--bh per data). */
+#season .qbar{display:block;width:14px;height:var(--bh,0px);max-height:2px;
+  transition:max-height .28s ease, background .2s ease, width .28s ease;margin:0 auto 2px;
+  border-radius:2px 2px 0 0;background:#4a6345;min-height:2px}
+#season .qbar.peak{width:100%;background:#d8b53f}
+#season .qbar.hot{background:#d8b53f}
+#season .qbar.none{visibility:hidden}
+#season:hover .qbar{max-height:30px;width:14px}
+#season.sunk .qbar{visibility:hidden}
+#season.sunk:hover .qbar{max-height:2px}
+#season button.on{background:#3f5c39;color:#fff}
+#season.gold button.on{background:#8a6d14}
+#season.sunk{opacity:.4}
+#season.sunk button{cursor:not-allowed}
+#seasonNote{position:absolute;right:0;bottom:44px;background:rgba(10,18,10,.95);border:1px solid #2c3d2a;
+  border-radius:9px;padding:6px 9px;font-size:10.5px;color:#c9dabd;white-space:nowrap;opacity:0;
+  transition:opacity .2s ease;pointer-events:none}
+#seasonNote.on{opacity:1}
+#lensBtn{display:block;width:100%;margin-top:7px;background:#141f12;border:1.5px solid #33472e;
+  color:#b7cbac;border-radius:10px;padding:8px 4px;font:inherit;font-size:10px;font-weight:700;
+  cursor:pointer;min-height:32px}
+#lensBtn.on{background:#3f5c39;color:#fff}
+#lensBtn .glass{width:13px;height:13px;vertical-align:-2px;margin-right:1px}
+#lensBtn .arr{display:inline-block;font-size:14px;line-height:1;vertical-align:-1px;
+  transition:transform .34s cubic-bezier(.2,.7,.3,1)}
+#lensBtn.on .arr{transform:rotate(180deg)}
+
+
+/* toast */
+#toast{position:absolute;left:50%;bottom:170px;transform:translateX(-50%);z-index:8;
+  background:rgba(10,18,10,.95);border:1px solid #3a4f35;border-radius:11px;padding:9px 14px;
+  font-size:12.5px;color:#dcead2;max-width:86vw;text-align:center;opacity:0;transition:opacity .25s ease;
+  pointer-events:none}
+#toast.on{opacity:1}
+#toast a{color:#d8b53f;pointer-events:auto}
+
+/* minimal-swine veil */
+#veil{position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:4;
+  pointer-events:none;padding:20px}
+#veil.on{display:flex}
+#veil .card{background:rgba(14,22,13,.92);border:1px solid #33472e;border-left:4px solid #d8b53f;
+  border-radius:12px;padding:16px 18px;max-width:420px;font-size:13.5px;line-height:1.55;color:#c9dabd}
+#veil b{color:#f2f7ee;display:block;margin-bottom:4px}
+
+/* ---------------- sheets ---------------- */
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:20;background:#131c11;color:#cfe0c6;
+  border-radius:18px 18px 0 0;box-shadow:0 -8px 40px rgba(0,0,0,.7);border-top:1px solid #2c3d2a;
+  transform:translateY(103%);visibility:hidden;max-height:86vh;display:flex;flex-direction:column;
+  transition:transform .3s cubic-bezier(.2,.7,.3,1),visibility 0s .3s;
+  padding-bottom:env(safe-area-inset-bottom)}
+.sheet.open{transform:none;visibility:visible;
+  transition:transform .3s cubic-bezier(.2,.7,.3,1),visibility 0s 0s}
+.sheet-head{display:flex;align-items:center;gap:10px;padding:16px 18px 8px}
+.sheet-head h2{font-size:16px;color:#f2f7ee;flex:1}
+.sheet-x{width:32px;height:32px;border-radius:50%;background:#20301d;border:0;color:#b7cbac;
+  font-size:15px;font-weight:700;cursor:pointer;position:relative}
+.sheet-x::after{content:"";position:absolute;inset:-8px}
+.sheet-body{overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;
+  padding:4px 18px 20px;font-size:13.5px;line-height:1.6}
+.sheet-body h3{font-size:13px;color:#a9d194;margin:14px 0 4px}
+.sheet-body p,.sheet-body li{color:#b7cbac;margin-bottom:6px}
+.sheet-body ul{padding-left:18px}
+.sheet-body b{color:#e9f2e2}
+.sheet-body a{color:#d8b53f}
+.mtoggle{display:flex;align-items:center;gap:10px;background:#1a271700;border:1px solid #2c3d2a;
+  border-radius:10px;padding:10px 12px;margin-top:10px}
+.mtoggle button{margin-left:auto;background:#20301d;border:1px solid #33472e;color:#dcead2;
+  border-radius:999px;padding:6px 14px;font:inherit;font-size:12px;font-weight:700;cursor:pointer}
+.mtoggle button.on{background:#3f5c39}
+
+/* first-run framing overlay */
+#framing{position:fixed;inset:0;z-index:30;background:rgba(5,9,5,.88);display:none;
+  align-items:center;justify-content:center;padding:24px}
+#framing.on{display:flex}
+#framing .card{background:#131c11;border:1px solid #33472e;border-radius:16px;max-width:430px;
+  padding:22px 22px 18px;font-size:14px;line-height:1.6;color:#c9dabd}
+#framing h2{color:#f2f7ee;font-size:19px;margin-bottom:8px}
+#framing b{color:#e9f2e2}
+#framing button{margin-top:14px;width:100%;background:#3f5c39;border:0;color:#fff;border-radius:11px;
+  padding:12px;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
+
+@media (max-width:520px){
+  #cats{min-width:150px}
+  #season button{padding:7px 6px}
+  #knobWrap{width:66px}#knob{width:58px;height:58px}
+  #knob .pointer{transform-origin:50% 24px;height:13px}
+}
+@media (prefers-reduced-motion: reduce){
+  *{transition-duration:.01ms !important}
+}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="ribbons" class="fadeable"></canvas>
+  <canvas id="motes" class="fadeable"></canvas>
+  <div id="lensLayer">
+    <div class="lenshead"><h3 id="lensTitle">County lens</h3><button id="lensX" aria-label="Close lens">✕</button></div>
+    <div class="well"><div class="lensload" id="lensLoad">loading county map…</div><img id="lensImg" alt=""><div class="lenscap" id="lensCap"></div></div>
+  </div>
+  <div id="vignette"></div>
+  <div id="labels" class="fadeable"></div>
+  <div id="tagChip"></div>
+  <div id="veil"><div class="card"><b>Minimal modeled swine movement</b><span id="veilText"></span></div></div>
+</div>
+
+<div id="topbar">
+  <div>
+    <div id="stateName">—</div>
+    <div id="capChip">—</div>
+    <div id="statChips"></div>
+  </div>
+  <div id="topRight">
+    <div id="legendChip">—</div>
+    <button id="aboutBtn">ⓘ about &amp; honesty</button>
+  </div>
+</div>
+
+<div id="shelf"></div>
+
+<div id="dock">
+  <div id="knobWrap">
+    <span class="detent d-map">MAP</span><span class="detent d-rank">RANK</span>
+    <div id="knob"><div class="pointer"></div></div>
+    <div class="ctl-label">layout</div>
+    <button id="lensBtn"><svg class="glass" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.8 9.8 L14 14" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg> county <span class="arr">▸</span></button>
+  </div>
+  <div id="flowWrap">
+    <div id="flow"><div class="cap">OUT</div></div>
+    <div class="ctl-label">direction</div>
+  </div>
+  <div id="catWrap">
+    <div id="cats">
+      <div class="pill"></div>
+      <button data-cat="cattle">Cattle</button><button data-cat="beef">Beef</button>
+      <button data-cat="dairy">Dairy</button><button data-cat="swine">Swine</button>
+    </div>
+    <div class="ctl-label">commodity</div>
+  </div>
+  <div id="rightCol">
+    <div id="seasonWrap">
+      <div id="season">
+        <button id="playYear" title="Cycle the modeled year"><span class="qbar none"></span>▶</button>
+        <button data-q="0" class="on"><span class="qbar none"></span>YEAR</button>
+        <button data-q="1"><span class="qbar"></span>Q1</button>
+        <button data-q="2"><span class="qbar"></span>Q2</button>
+        <button data-q="3"><span class="qbar"></span>Q3</button>
+        <button data-q="4"><span class="qbar"></span>Q4</button>
+      </div>
+      <div id="seasonNote"></div>
+      <div class="ctl-label">season</div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<div class="sheet" id="aboutSheet" role="dialog" aria-labelledby="aboutTitle" tabindex="-1">
+  <div class="sheet-head"><h2 id="aboutTitle">About DROVE &amp; the model</h2><button class="sheet-x" id="aboutX" aria-label="Close">✕</button></div>
+  <div class="sheet-body">
+    <p><b>DROVE animates USAMM model projections — it is not live tracking.</b> Every flow you see
+    is the <b>annual mean</b> of modeled shipments from the U.S. Animal Movement Model (Colorado
+    State University): the mean of <b>1,000 modeled networks</b> for cattle, beef and dairy, and
+    <b>250</b> for swine. The unit is <b>modeled shipments</b>, not USDA/NASS counts.</p>
+    <h3>How the animation encodes data</h3>
+    <ul>
+      <li><b>Dot rate</b> on each link is proportional to that partner's modeled shipments/yr through
+        one shared, automatically chosen scale — the legend chip always states the live
+        "1 dot ≈ K shipments/yr", and rescaling never changes the proportions between links.
+        One full dot journey ≈ one modeled year.</li>
+      <li><b>Ribbon width</b> ∝ √(shipments/yr). Partners under 1% of out-of-state flow keep their
+        ribbon but emit no dots (stated in the legend when active).</li>
+      <li><b>Dot size</b> (cattle family, <b>outgoing view only</b>) reflects typical shipment
+        size — <b>head, estimated from shipment-size-bin midpoints</b>. Swine dots are uniform
+        (swine reports shipments only — no head estimate; its saved bins are cattle-scaled), and
+        <b>inbound dots are uniform too</b>: the pipeline reports no inbound shipment-size
+        distribution, and DROVE never reuses outbound provenance for the inbound view.</li>
+      <li><b>Dot color in the Cattle view</b> (outgoing only) samples the state's real beef/dairy
+        commodity split — warmer green = beef share, teal = dairy share, in the state's actual
+        proportions. Inbound cattle is combined-commodity in the model, so inbound dots stay one
+        color.</li>
+      <li><b>▶ Year cycle</b> replays the modeled year on a loop: emission follows each quarter's
+        real share of the state total (the same four numbers as the Q1–Q4 buttons — smoothly
+        blended between quarters for display, never quoted as sub-quarterly data).</li>
+      <li>The <b>orbit ring</b> around the hub shows the in-state share: each orbiting dot ≈ 1% of
+        total shipments that stay in-state (outbound) or arrive from within the state (inbound) —
+        a share indicator, deliberately on a different scale than the flow dots (both scales are
+        stated here). Inbound totals include in-state arrivals; the halo counts only the
+        out-of-state remainder.</li>
+      <li>The <b>outer halo</b> absorbs the residual: out-of-state flow beyond the 12 ranked
+        partners, labeled "other states (combined)" — so what you see totals honestly.</li>
+      <li>The hub's slow breathing and shimmer are <b>ambient motion — they encode no data</b>.
+        The orbit's spin direction is a convention only: clockwise for outgoing, counter-clockwise
+        for inbound. Arcs are schematic connectors between state centroids, not transport routes.</li>
+    </ul>
+    <h3>Directions &amp; seasons</h3>
+    <ul>
+      <li><b>Inbound</b> (cattle &amp; swine) uses the model's own destination-side ranked partner
+        arrays — never relabeled outbound data. A state's inbound picture is assembled from other
+        states' ICVI fits, so it inherits their data vintage and coverage (slightly softer than
+        outbound). Beef/dairy have no inbound facts, so their inbound animation is disabled — the
+        county lens offers their real static inbound maps instead.</li>
+      <li><b>Season</b> uses each partner corridor's own real quarterly breakdown (baked
+        2026-08-14 from the raw networks by generate_flow_detail.R) — partners genuinely surge at
+        different times of the modeled year. Corridors below the bake's 1-shipment/yr floor fall
+        back to the state-level share (the caption says so). The outer "other states" halo stays
+        at its annual mean — residual quarters are not broken out. Inbound quarters come from the
+        same per-pair bake, aggregated for the season bars.</li>
+      <li><b>Stream steadiness</b> (cattle &amp; swine): each corridor's emission regularity
+        reflects its across-network consistency — steady corridors flow like metronomes, corridors
+        the model is uncertain about visibly sputter. The modulation is mean-preserving (long-run
+        rate stays ∝ the modeled mean) and derives from the real standard deviation across the
+        1,000 / 250 networks. Tap any ribbon to see the middle-80% range behind it.</li>
+    </ul>
+    <h3>What is not here</h3>
+    <ul>
+      <li><b>Inventory is not modeled.</b> Nodes pulse and decay — nothing accumulates or holds a
+        stock level, anywhere.</li>
+      <li>County-level flows are not animated — the facts are state-level. The county lens shows the
+        real generated county choropleths (the same maps as the printed flyers) as the sole
+        county-level authority.</li>
+      <li>Sparse swine states (Montana, New Mexico, New York — fewer than 750 modeled outgoing swine
+        shipments/yr) suppress all swine views, matching the flyers. Swine vintage: 2010–2011 ICVI.</li>
+    </ul>
+    <p>Companion app: <a href="../mobile/" id="pocketLink">Pocket USAMM</a> (reference cards, full
+    honesty statement). Authoritative methods: <i>USAMM_figures_methods.pdf</i> in the flyer package.</p>
+    <div class="mtoggle"><span>Motion</span><button id="motionBtn" class="on">ON</button></div>
+  </div>
+</div>
+
+<div id="framing">
+  <div class="card">
+    <h2>DROVE</h2>
+    <p>The USAMM flyers, un-frozen: modeled livestock movement as a living network you can touch.</p>
+    <p style="margin-top:8px"><b>Animated flows are a visual metaphor for annual-mean model
+    projections</b> (1,000 modeled networks for cattle · beef · dairy; 250 for swine).
+    <b>Nothing here is live tracking.</b></p>
+    <p style="margin-top:8px;font-size:12.5px;color:#9db593">Tap a ribbon for its exact number ·
+    drag the knob to morph layouts · flick the shelf to change states.</p>
+    <button id="framingGo">Let it move</button>
+  </div>
+</div>
+
+<script src="../figure-generation/visuals/state-geo.js"></script>
+<script src="../figure-generation/visuals/state-outlines.js"></script>
+<script src="../figure-generation/visuals/flow-detail.js"></script>
+<script src="../figure-generation/visuals/states-data.js"></script>
+<script src="drove.js"></script>
+</body>
+</html>

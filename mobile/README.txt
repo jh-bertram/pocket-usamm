@@ -1,6 +1,11 @@
 Pocket USAMM — mobile-first web app (fun side project, 2026-08-13)
 ==================================================================
 
+LIVE: https://jh-bertram.github.io/pocket-usamm/mobile/
+Published 2026-08-13 from the curated public repo github.com/jh-bertram/pocket-usamm
+(local clone: C:\Users\bertramj\Documents\pocket-usamm — run its sync-from-usamm.ps1
+after any data/app change here, review the diff, commit, push; Pages redeploys itself).
+
 One-file, no-build, mobile-first reference app for the USAMM flyer data:
 15 states x {cattle, beef, dairy, swine} x {outgoing, inbound}, county map
 sheets, and a full "About the model" honesty screen.

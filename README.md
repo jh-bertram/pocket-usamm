@@ -1,9 +1,14 @@
-# Pocket USAMM
+# Pocket USAMM & DROVE
 
-A mobile-first pocket reference for modeled livestock movement from the
+Two companion apps for modeled livestock movement from the
 **U.S. Animal Movement Model (USAMM)**, developed at Colorado State University.
 
-**Open the app: [`mobile/`](mobile/)** (best on a phone)
+- **[`mobile/`](mobile/) — Pocket USAMM**: a mobile-first reference card app
+  (best on a phone)
+- **[`drove/`](drove/) — DROVE**: the same projections as a living, touchable
+  animated network — particle flows over real state geography, morphing
+  layouts, per-partner seasonality, and the model's own uncertainty animated
+  as stream steadiness (best on a larger screen)
 
 ## What it shows
 
