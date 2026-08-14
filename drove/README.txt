@@ -35,7 +35,20 @@ ENCODINGS (all declared in the legend chip + About sheet)
              swine = gold; inbound cattle = single color (combined-commodity)
   orbit ring 1 dot ≈ 1% in-state share (stay in-state / arrive from in-state)
   halo       residual beyond the 12 ranked partners — inbound residual uses
-             in_from_outstate_pct so in-state arrivals are never mislabeled
+             in_from_outstate_pct so in-state arrivals are never mislabeled.
+             Its particle stream is named THE DRIFT (halo label + About sheet;
+             ranch term for animals wandering from the herd): same 1-dot≈K
+             rate as every stream, rendered as a soft 20px mote at
+             DRIFT_DIM=0.45 (v2 2026-08-14: the original 88px wash at 0.25
+             read as meaningless noise — "it IS data", so it now reads as an
+             attributable mote, softer than a ranked dot but unmistakably one)
+  ▲▼ rail    playback speed 0.25×–3× (right center, log scale, magnetic 1×
+             detent, keyboard-operable): scales DATA time only — proportions
+             and 1-loop≈1-modeled-year unchanged; legend states the rate
+             whenever ≠1× AND motion is on (a frozen static scene claims no
+             rate); hidden in static mode; speed survives a motion round-trip
+  ripple     dots near the finger/cursor shimmy in RENDER space only (pure
+             theater, declared in About; route/timing/size/color untouched)
   ▶ year     emission cycles the four REAL quarterly shares (12s = 1 modeled yr)
 
 HONESTY GATES (CAPS matrix in drove.js — single source)
@@ -45,6 +58,62 @@ HONESTY GATES (CAPS matrix in drove.js — single source)
   (no inbound quarters); county-level flows never animated (facts are
   state-level — the lens shows the real county choropleths); nothing
   accumulates (inventory is not modeled).
+
+MOBILE CHROME (2026-08-14 ticket round, ≤640px):
+  shelf rides the VERY top; topbar (stats left / legend right) starts below
+  it; the dock wraps so SEASON gets its own row above commodity; the legend
+  collapses its encoding-detail tail (.lgx) behind a gold "▾ full key" tap —
+  the live dot scale, governor note, "annual means, not live tracking" AND
+  the floored-partners line (when active) NEVER collapse, and desktop always
+  shows the full key. drove.js measures the chrome live (measureChrome):
+  wsTop clears shelf+stat block, rankSafeTop clears the legend/about column
+  so RANK row 1 is never hidden, and the RANK column sits at 0.56 width
+  (vs 0.78; breakpoint shared with CSS via matchMedia) so row labels fit.
+  Adversarial panel (4 lenses, 18 agents) on this round: 13 confirmed, all
+  fixed — highlights: layoutScene re-measures AFTER the chrome pass and
+  re-runs geometry once (scene changes no longer lay out against the
+  PREVIOUS scene's chrome — worst case was gated→live on a phone); season/
+  playYear/governor chrome rewrites glide the workspace via
+  relayoutIfChromeMoved(); ws() slides up (never under the dock) when its
+  200px floor engages on tiny screens; toast bottom is measured, not
+  hardcoded; rank-span floor scales with row count (expanded key on short
+  phones); interrupted re-rank staggers flush their gray queued flags;
+  "▾ full key" is keyboard-operable (tabindex/Enter/Space/aria-expanded)
+  with a 44px-class hit box and no longer yanks the shelf scroll;
+  snapshot() gained legendVisible/legendExpanded so sweeps see what the
+  USER sees (textContent includes display:none text — a sweep blind spot).
+
+ROUND 3 (2026-08-14 evening, user tickets): season+commodity now share a
+  right-aligned column in the dock on phones (#dockRight — display:contents
+  on desktop so its flex line is untouched; on phones season sits directly
+  above commodity, flush right, in plane with the layout dial); drift
+  sprite/dim retuned (above); drift caption clamps into the viewport in RANK
+  (was off-screen left of the hub); playback-speed rail + pointer ripple
+  (above); TRANSITION PASS — no crossfades in movement, pan/zoom only: the
+  MAP underlay now ZOOMS into the focal badge during the RANK morph (per-
+  vertex blend of map projection and badge frame, shared with the flow-hover
+  pulse via morphProj so they never disagree mid-scrub; was an alpha fade +
+  separate fading badge). Non-focal rings ALSO dim with the dial —
+  0.14×(1−t), gone at RANK rest — because the badge scale ≈ the map scale
+  for large focal states, so geometry alone provably cannot evict them
+  (round-3 panel measured the full CONUS surviving the cull at Texas badge
+  scale); the dim rides the morph t, not a timed fade, so the transition
+  still reads as pan/zoom. State/direction travel hard-flushes
+  motes+fadingMotes (frozen dots no longer hang in screen space mid-pan;
+  category swaps keep the ~0.9s freeze-and-fade grace, which runs on REAL
+  time at every playback speed), dead .fadeable class removed. Steadiness
+  sputter + year cycle ride DATA time so they follow playback speed.
+
+ROUND 3 PANEL (4 lenses, 14 agents): 10 confirmed, 0 refuted — all fixed:
+  static-mode legend no longer claims "N× playback" (gated on motion; the
+  rate survives a motion round-trip and the disclosure reappears with it);
+  freeze-fade on real time (was 3.6s at 0.25×); ripple wobble phase baked
+  per-mote at emission (array-index churn made it flicker, not shimmy);
+  non-focal rings dial-dim (above); flow-hover pulse uses the shared
+  blended projector (was detached duplicate rings mid-scrub); desktop RANK
+  column caps at box.w−175 so row labels clear the speed rail at 641–850px;
+  degenerate DC outline dropped (R guard + regenerated state-outlines.js +
+  a defensive NaN-bbox skip in OUTLINE_BOX).
 
 VERIFIED (2026-08-14): 120-combo sweep 0 errors ×4 rounds; inbound halo
 residual hand-checked (NE swine = 587/yr); 61 fps @ ~300 motes; reduced-motion

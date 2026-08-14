@@ -42,6 +42,12 @@ var HUE = {
   swine:  { body: "#d8b53f", core: "#f4e3a1", ribbon: "216,181,63" }
 };
 
+/* ONE breakpoint, shared with the CSS @media (max-width:640px) block via the
+   identical media condition — JS and CSS can never disagree on which side a
+   width falls (a hand-copied "< 640" once clipped rank labels at exactly 640) */
+var PHONE_MQ = window.matchMedia ? matchMedia("(max-width:640px)") : null;
+function isPhone() { return PHONE_MQ ? PHONE_MQ.matches : W <= 640; }
+
 var TRAVEL_S = 3.0;                        /* one dot journey ≈ 1 modeled year */
 var CAP_SOFT = 330, CAP_HARD = 450;
 var K_STEPS = [10, 25, 50, 100];
@@ -64,6 +70,8 @@ var S = {
   layout: 0,                               /* 0 = MAP, 1 = RANK (knob scrub blends) */
   quarter: 0,                              /* 0 = annual, 1..4 */
   K: 25, autoK: 25,                        /* user faucet K; autoK = effective (≥K) */
+  speed: 1,                                /* playback rate 0.25–3×: DATA time only —
+                                              proportions & 1-loop≈1-modeled-year unchanged */
   lens: false, lensDir: null, playYear: false,
   motion: !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches),
   settled: false
@@ -183,10 +191,14 @@ function resize() {           /* boot path: size + snap-layout in one step */
   if (!S.motion) staticRender();
 }
 
-/* workspace = stage minus chrome */
+/* workspace = stage minus chrome. When the 200px height floor engages
+   (tiny viewports), the box slides UP so its bottom stays anchored at the
+   measured dock top — overflow goes under the translucent topbar, never
+   under the opaque dock controls. */
 function ws() {
   var h = Math.max(200, H - wsTop - wsBot);
-  return { x: 26, y: wsTop, w: W - 52, h: h };
+  var y = Math.max(0, Math.min(wsTop, H - wsBot - h));
+  return { x: 26, y: y, w: W - 52, h: h };
 }
 
 /* ---------------- scene model ---------------- */
@@ -194,6 +206,19 @@ var nodes = {};   /* name -> {sx,sy(Springs), r, glow, hub, alpha} */
 var links = [];   /* {name, ship(Spring displayed), pct, pctOut, floored, lut, width} */
 var haloR = 0, orbitDots = [], sceneInfo = null;
 var OUTLINES = window.USAMM_OUTLINES || {};
+/* per-state lon/lat bboxes, for culling rings that zoom out of frame.
+   Degenerate rings (e.g. a DC entry the R simplifier collapsed to nothing)
+   are dropped entirely — a NaN bbox would silently defeat the cull. */
+var OUTLINE_BOX = {};
+Object.keys(OUTLINES).forEach(function (st) {
+  var ring = OUTLINES[st], b = [1e9, -1e9, 1e9, -1e9];
+  for (var i = 0; i < ring.length; i++) {
+    b[0] = Math.min(b[0], ring[i][0]); b[1] = Math.max(b[1], ring[i][0]);
+    b[2] = Math.min(b[2], ring[i][1]); b[3] = Math.max(b[3], ring[i][1]);
+  }
+  if (ring.length < 3 || !isFinite(b[0] + b[1] + b[2] + b[3])) { delete OUTLINES[st]; return; }
+  OUTLINE_BOX[st] = b;
+});
 var mapProj = null;                        /* saved by layoutScene for the outline underlay */
 var outlineCv = document.createElement("canvas"), outlineDirty = true;
 var haloRS = new Spring(200, 40);          /* halo radius glides, never snaps */
@@ -237,7 +262,7 @@ function layoutScene(snap) {
   document.getElementById("veil").classList.toggle("on", !!R.gated);
   Object.keys(nodes).forEach(function (k) { nodes[k].gone = true; });
   if (anchorsChanged) {
-    motes.length = 0; haloAcc = 0;
+    motes.length = 0; fadingMotes.length = 0; haloAcc = 0;
     if (moteCx) moteCx.clearRect(0, 0, W, H);
   }
   orbitTargetN = 0;                        /* re-set below for live scenes */
@@ -279,10 +304,21 @@ function layoutScene(snap) {
   outlineDirty = true;
   hubGeoRef = hubGeo;
 
-  /* RANK positions */
+  /* RANK positions — the row column starts below the legend/about column
+     (rankSafeTop) so rank 1 is never hidden behind it; on phones the column
+     shifts left so the full row labels fit on-screen. The span floor scales
+     with the row count: if honoring rankSafeTop would compress rows below
+     ~label height (user-expanded full key on a short phone), the rows keep
+     the whole box and slide under the temporary, tap-to-collapse key instead. */
   var rankHub = [box.x + box.w * 0.22, box.y + box.h * 0.5];
-  var rankX = box.x + box.w * 0.78;
-  var rankY = function (i, n) { return box.y + box.h * (n === 1 ? 0.5 : 0.08 + 0.84 * i / (n - 1)); };
+  /* desktop: cap the column so the widest row label (~150px with a quarter
+     suffix, + node radius + gap) clears the fixed speed rail (right-center)
+     — bites only on narrow-desktop widths (< ~915px) */
+  var rankX = box.x + (isPhone() ? box.w * 0.56 : Math.min(box.w * 0.78, box.w - 190));
+  var rankB = box.y + box.h;
+  var minSpan = Math.max(120, partners.length * 22);
+  var rankT = Math.max(box.y, Math.min(rankSafeTop, rankB - minSpan));
+  var rankY = function (i, n) { return rankT + (rankB - rankT) * (n === 1 ? 0.5 : 0.08 + 0.84 * i / (n - 1)); };
   sceneRankHub = rankHub;
 
   var t = S.layout;                        /* 0..1 blend */
@@ -369,11 +405,26 @@ function layoutScene(snap) {
 
   if (snap || !S.motion) Object.keys(nodes).forEach(function (k) { nodes[k].sx.snap(); nodes[k].sy.snap(); });
   Object.keys(nodes).forEach(function (k) { if (nodes[k].gone) { nodes[k].alphaT = 0; } });
+  /* flush any in-flight stagger's queued flags — an interrupting relayout
+     (resize, knob scrub, legend toggle) must never leave rows gray forever */
+  if (rankStagger) rankStagger.forEach(function (it) { it.n.queued = false; });
+  rankStagger = null;
+  var wantStagger = S.motion && !snap && sceneChanged && S.layout >= 0.5 && links.length > 0;
+  if (sceneChanged) {                       /* knob scrub / resize skip the expensive chrome pass */
+    autoKUpdate(); updateChrome(); rebuildLabels();
+    /* the chrome pass rewrites the legend/stat chips, which can CHANGE the
+       measured chrome height (worst: a gated scene's "—" chrome → live).
+       Re-measure and re-run the geometry once against the real chrome —
+       on re-entry sceneChanged is false, so this cannot recurse. The
+       stagger is built after, against the final targets. */
+    var preM = wsTop + "|" + wsBot + "|" + rankSafeTop;
+    measureChrome();
+    if (wsTop + "|" + wsBot + "|" + rankSafeTop !== preM) layoutScene(snap);
+  }
   /* RANK re-rank choreography: on a scene change in the list view, each row
      holds, dims for a beat, pulses ("considering its new rank"), then glides
      to its slot — sequenced top to bottom. Pure theater; targets are the same. */
-  rankStagger = null;
-  if (S.motion && !snap && sceneChanged && S.layout >= 0.5 && links.length) {
+  if (wantStagger) {
     rankStagger = links.map(function (l, i) {
       var it = { n: l.node, tx: l.node.sx.t, ty: l.node.sy.t,
                  at: perfNow / 1000 + 0.25 + i * 0.14, dimmed: false, done: false };
@@ -382,21 +433,35 @@ function layoutScene(snap) {
       return it;
     });
   }
-  if (sceneChanged) {                       /* knob scrub / resize skip the expensive chrome pass */
-    autoKUpdate(); updateChrome(); rebuildLabels();
-  }
   S.settled = false; settleTimer = 0;
   if (!S.motion) staticRender();
 }
-/* cached chrome bounds — ws() runs per-link per-frame, never measure there */
-var wsTop = 182, wsBot = 205;
+/* cached chrome bounds — ws() runs per-link per-frame, never measure there.
+   wsTop clears the shelf AND the left stat block (they stack on phones);
+   rankSafeTop additionally clears the legend/about column so the top RANK
+   rows never hide behind it — MAP keeps the taller box (the legend only
+   floats over an empty map corner there). */
+var wsTop = 182, wsBot = 205, rankSafeTop = 0;
 function measureChrome() {
   try {
     var sh = document.getElementById("shelf").getBoundingClientRect();
+    var st = document.getElementById("statChips").getBoundingClientRect();
+    var tr = document.getElementById("topRight").getBoundingClientRect();
     var dk = document.getElementById("dock").getBoundingClientRect();
-    wsTop = Math.max(140, sh.bottom + 8);
+    wsTop = Math.max(140, Math.max(sh.bottom, st.bottom) + 8);
+    rankSafeTop = tr.bottom + 12;
     wsBot = Math.max(150, H - dk.top + 6);
+    /* the toast must clear the MEASURED dock (it wraps taller on phones) */
+    document.getElementById("toast").style.bottom = (wsBot + 6) + "px";
   } catch (e) {}
+}
+/* chrome text can grow or shrink WITHOUT a scene change (season captions
+   wrapping capChip, the governor's legend note) — after any such
+   updateChrome, glide the workspace only if the chrome actually moved */
+function relayoutIfChromeMoved() {
+  var pre = wsTop + "|" + wsBot + "|" + rankSafeTop;
+  measureChrome();
+  if (wsTop + "|" + wsBot + "|" + rankSafeTop !== pre) layoutScene(false);
 }
 
 /* bezier LUT per link, computed each frame from live node positions */
@@ -430,17 +495,18 @@ function sprite(body, core, r) {
   cx.fillStyle = g; cx.fillRect(0, 0, s, s);
   return (sprites[key] = cv);
 }
-/* halo motes are deliberately NOT dots: a wide, faint breath of light that
-   reads as ambient in/out flow rather than an attributable stream */
+/* drift motes ("the drift" — the residual stream) are soft but ATTRIBUTABLE:
+   they are data, so they read as motes — a touch larger and softer than a
+   ranked-stream dot, no longer the old 88px ambient wash (2026-08-14 v2:
+   "they should still be more blurred than regular dots but not as much") */
 function haloSprite(body) {
   var key = "halo" + body;
   if (sprites[key]) return sprites[key];
-  /* half the brightness, twice the diffusion — pure ambience, never a dot */
-  var s = 88, cv = document.createElement("canvas");
+  var s = 20, cv = document.createElement("canvas");
   cv.width = cv.height = s;
   var cx = cv.getContext("2d");
   var g = cx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
-  g.addColorStop(0, body + "17"); g.addColorStop(0.5, body + "0b"); g.addColorStop(1, body + "00");
+  g.addColorStop(0, body + "cc"); g.addColorStop(0.35, body + "55"); g.addColorStop(1, body + "00");
   cx.fillStyle = g; cx.fillRect(0, 0, s, s);
   return (sprites[key] = cv);
 }
@@ -470,8 +536,9 @@ function emit(dt) {
   };
   links.forEach(function (l) {
     if (l.floored) return;
-    /* per-partner quarter rate × steadiness burst (mean-preserving, cv ≤ 1) */
-    var burst = l.cv ? Math.max(0, 1 + l.cv * Math.sin(perfNow / 1000 * l.burstW + l.burstP)) : 1;
+    /* per-partner quarter rate × steadiness burst (mean-preserving, cv ≤ 1);
+       the burst rides DATA time so the sputter rhythm follows playback speed */
+    var burst = l.cv ? Math.max(0, 1 + l.cv * Math.sin(dataNow / 1000 * l.burstW + l.burstP)) : 1;
     l.acc += spawnRate(l.disp.v) * linkMult(l) * burst * dt;
     while (l.acc >= 1 && motes.length < CAP_HARD) {
       l.acc -= 1;
@@ -479,7 +546,8 @@ function emit(dt) {
       /* inbound dots are UNIFORM — volume_bins are outbound-direction only,
          and DROVE never substitutes wrong-direction provenance */
       motes.push({ l: l, u: 0, dur: TRAVEL_S * (0.85 + Math.random() * 0.3),
-        r: S.dir === "in" ? 1.3 : binRadius(S.cat, d), core: h.core, body: h.body, dirIn: S.dir === "in" });
+        r: S.dir === "in" ? 1.3 : binRadius(S.cat, d), core: h.core, body: h.body, dirIn: S.dir === "in",
+        ph: Math.random() * Math.PI * 2 });   /* stable ripple phase (array index churns) */
       /* birth-color rule: core/body are fixed at emission and never re-tinted */
     }
     if (l.acc > 3) l.acc = 3;
@@ -490,16 +558,19 @@ function emit(dt) {
     while (haloAcc >= 1 && motes.length < CAP_HARD) {
       haloAcc -= 1;
       motes.push({ halo: true, a: (motes.length * 2.399963) % (Math.PI * 2), u: 0,
-        dur: TRAVEL_S * (0.85 + Math.random() * 0.3), r: 1.1, core: hue.core, body: hue.body, dirIn: S.dir === "in" });
+        dur: TRAVEL_S * (0.85 + Math.random() * 0.3), r: 1.1, core: hue.core, body: hue.body,
+        dirIn: S.dir === "in", ph: Math.random() * Math.PI * 2 });
     }
     if (haloAcc > 3) haloAcc = 3;
   }
 }
 var haloAcc = 0;
 
-function stepMotes(dt) {
+function stepMotes(dt, dtUI) {
+  /* the grace fade is UI theater, not data — it runs on REAL time so the
+     ~0.9s promise holds at every playback speed */
   for (var j = fadingMotes.length - 1; j >= 0; j--) {
-    fadingMotes[j].a -= dt / 0.9;          /* frozen dots fade over ~0.9s */
+    fadingMotes[j].a -= (dtUI != null ? dtUI : dt) / 0.9;
     if (fadingMotes[j].a <= 0) fadingMotes.splice(j, 1);
   }
   var hub = nodes[S.state];
@@ -522,11 +593,14 @@ function drawMotes() {
   for (var fi = 0; fi < fadingMotes.length; fi++) {
     var fm = fadingMotes[fi];
     var fsp = fm.halo ? haloSprite(fm.body) : sprite(fm.body, fm.core, fm.r);
-    moteCx.globalAlpha = Math.max(0, fm.a);
+    moteCx.globalAlpha = Math.max(0, fm.a) * (fm.halo ? DRIFT_DIM : 1);
     moteCx.drawImage(fsp, fm.x - fsp.width / 2, fm.y - fsp.height / 2);
   }
   moteCx.globalAlpha = 1;
   var hub = nodes[S.state]; if (!hub) { moteCx.globalCompositeOperation = "source-over"; return; }
+  /* pointer-ripple envelope for this frame — fades out ~0.7s after the
+     pointer stops moving */
+  var rEnv = Math.max(0, 1 - (perfNow - ptrT) / 700);
   for (var i = 0; i < motes.length; i++) {
     var m = motes[i], x, y;
     var u = m.dirIn ? 1 - m.u : m.u;      /* birth-color + reversed traversal for inbound */
@@ -539,8 +613,22 @@ function drawMotes() {
       var p0 = lut[Math.min(16, i0)], p1 = lut[Math.min(16, i0 + 1)];
       x = p0[0] + (p1[0] - p0[0]) * fr; y = p0[1] + (p1[1] - p0[1]) * fr;
     }
+    /* the ripple: a radial bulge + tangential shimmy near the pointer,
+       applied to the DRAWN position only — the mote's journey is untouched */
+    if (rEnv > 0.01) {
+      var rdx = x - ptrX, rdy = y - ptrY, rd2 = rdx * rdx + rdy * rdy;
+      if (rd2 < RIPPLE_R * RIPPLE_R) {
+        var rd = Math.sqrt(rd2) || 1, inf = (1 - rd / RIPPLE_R) * rEnv;
+        var wob = Math.sin(perfNow / 1000 * 9 + (m.ph || 0)) * 5 * inf;
+        var push = 9 * inf * inf;
+        x += (rdx / rd) * push - (rdy / rd) * wob;
+        y += (rdy / rd) * push + (rdx / rd) * wob;
+      }
+    }
     var sp = m.halo ? haloSprite(m.body) : sprite(m.body, m.core, m.r);
+    if (m.halo) moteCx.globalAlpha = DRIFT_DIM;
     moteCx.drawImage(sp, x - sp.width / 2, y - sp.height / 2);
+    if (m.halo) moteCx.globalAlpha = 1;
   }
   /* orbit ring — each dot ≈ 1% of the in-state share (persistent, fading) */
   if (orbitDots.length) {
@@ -558,6 +646,13 @@ function drawMotes() {
   moteCx.globalCompositeOperation = "source-over";
 }
 var orbitPhase = 0, trailAlpha = 0.22;
+/* "the drift" — the residual halo stream. Dimmed so the ranked streams stay
+   the story; the rate still uses the honest 1-dot≈K scale. (v2: sprite is
+   tighter now, so less dimming is needed for the same subordination.) */
+var DRIFT_DIM = 0.45;
+/* pointer ripple — PURE THEATER, declared in About: dots near the finger or
+   cursor shimmy in RENDER space only; route, timing, size, color untouched */
+var RIPPLE_R = 80, ptrX = -1e4, ptrY = -1e4, ptrT = -1e9;
 var orbitTargetN = 0;
 var orbitVel = new Spring(Math.PI * 2 / 12, 6);   /* soft: reversals decelerate through zero */
 function angDiff(a, b) { var d = a - b; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return d; }
@@ -621,28 +716,70 @@ function renderOutlineCache() {
   paintOutlines(oc, 1);
   outlineDirty = false;
 }
-/* focal-state outline drawn small around the hub while in RANK */
-function drawFocalBadge(hub, alpha) {
-  var ring = OUTLINES[S.state]; if (!ring || alpha <= 0.02) return;
-  var minLon = 1e9, maxLon = -1e9, minLat = 1e9, maxLat = -1e9;
-  for (var i = 0; i < ring.length; i++) {
-    minLon = Math.min(minLon, ring[i][0]); maxLon = Math.max(maxLon, ring[i][0]);
-    minLat = Math.min(minLat, ring[i][1]); maxLat = Math.max(maxLat, ring[i][1]);
+/* the RANK "badge" frame: the focal outline shrunk beside the hub. The morph
+   below interpolates EVERY state's vertices between the map projection and
+   this frame — so dialing to RANK ZOOMS the whole outline plane into the
+   badge (non-focal states exit the edges geometrically). No crossfade:
+   transitions are pan/zoom only. */
+var focalFrameC = null, focalFrameKey = "";
+function focalFrame() {
+  var key = S.state + "|" + (W > 700 ? "L" : "S");
+  if (focalFrameKey !== key) {
+    var ring = OUTLINES[S.state]; if (!ring) return null;
+    var minLon = 1e9, maxLon = -1e9, minLat = 1e9, maxLat = -1e9;
+    for (var i = 0; i < ring.length; i++) {
+      minLon = Math.min(minLon, ring[i][0]); maxLon = Math.max(maxLon, ring[i][0]);
+      minLat = Math.min(minLat, ring[i][1]); maxLat = Math.max(maxLat, ring[i][1]);
+    }
+    var cosB = Math.cos((minLat + maxLat) / 2 * Math.PI / 180);
+    var spanX = (maxLon - minLon) * cosB, spanY = maxLat - minLat;
+    focalFrameC = { cx0: (minLon + maxLon) / 2, cy0: (minLat + maxLat) / 2, cosB: cosB,
+                    sc: (W > 700 ? 220 : 110) / Math.max(spanX, spanY) };  /* ~2x on desktop */
+    focalFrameKey = key;
   }
-  var cosB = Math.cos((minLat + maxLat) / 2 * Math.PI / 180);
-  var spanX = (maxLon - minLon) * cosB, spanY = maxLat - minLat;
-  var sc = (W > 700 ? 220 : 110) / Math.max(spanX, spanY);   /* ~2x on desktop */
-  var cx0 = (minLon + maxLon) / 2, cy0 = (minLat + maxLat) / 2;
-  ribCx.beginPath();
-  for (var j = 0; j < ring.length; j++) {
-    var x = hub.sx.v + (ring[j][0] - cx0) * cosB * sc;
-    var y = hub.sy.v + (cy0 - ring[j][1]) * sc;
-    j ? ribCx.lineTo(x, y) : ribCx.moveTo(x, y);
-  }
-  ribCx.closePath();
-  ribCx.strokeStyle = "rgba(" + HUE[S.cat].ribbon + "," + (0.35 * alpha) + ")";
-  ribCx.lineWidth = 1.2;
-  ribCx.stroke();
+  return focalFrameC;
+}
+/* the blended projector, shared by the underlay AND the flow-hover pulse so
+   they can never disagree mid-scrub */
+function morphProj(t, hub) {
+  var bf = focalFrame();
+  if (!bf || t <= 0) return mapProj;
+  return function (lon, lat) {
+    var pm = mapProj(lon, lat);
+    return [pm[0] * (1 - t) + (hub.sx.v + (lon - bf.cx0) * bf.cosB * bf.sc) * t,
+            pm[1] * (1 - t) + (hub.sy.v + (bf.cy0 - lat) * bf.sc) * t];
+  };
+}
+function paintOutlinesMorph(ctx, t, hub) {
+  if (!mapProj) return;
+  var proj = morphProj(t, hub);
+  var rgb = HUE[S.cat].ribbon;
+  Object.keys(OUTLINES).forEach(function (st) {
+    var focal = st === S.state;
+    if (!focal) {
+      /* the badge scale ≈ the map scale for large focal states, so geometry
+         alone cannot evict non-focal rings — they DIM with the dial instead
+         (synced to the morph, not a timed fade) and are gone at RANK rest */
+      if (t > 0.98) return;
+      /* both projections are axis-aligned affine, so two bbox corners bound
+         the ring — skip rings that have zoomed out of frame */
+      var bb = OUTLINE_BOX[st];
+      var c1 = proj(bb[0], bb[2]), c2 = proj(bb[1], bb[3]);
+      if (Math.max(c1[0], c2[0]) < -40 || Math.min(c1[0], c2[0]) > W + 40 ||
+          Math.max(c1[1], c2[1]) < -40 || Math.min(c1[1], c2[1]) > H + 40) return;
+    }
+    var ring = OUTLINES[st];
+    ctx.beginPath();
+    for (var i = 0; i < ring.length; i++) {
+      var p = proj(ring[i][0], ring[i][1]);
+      i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]);
+    }
+    ctx.closePath();
+    if (focal) { ctx.fillStyle = "rgba(" + rgb + "," + (0.07 * (1 - t * 0.5)).toFixed(3) + ")"; ctx.fill(); }
+    ctx.strokeStyle = "rgba(" + rgb + "," + (focal ? 0.5 - 0.15 * t : 0.14 * (1 - t)).toFixed(3) + ")";
+    ctx.lineWidth = focal ? 1.4 - 0.2 * t : 1;
+    ctx.stroke();
+  });
 }
 
 /* ---------------- ribbons (also the reduced-motion scene) ---------------- */
@@ -655,31 +792,33 @@ function drawRibbons(staticMode) {
   /* cache each link's LUT for this frame — drawMotes reuses it */
   links.forEach(function (l) { l.lut = linkLUT(l); });
 
-  /* MAP underlay fades out as the knob dials to RANK; the focal badge fades in.
-     While the camera is in flight the outlines draw LIVE under it (the pan);
-     once settled they come from the cache. */
-  if (S.layout < 0.98) {
-    var base = 1 - S.layout;
-    if (!camSettled) {
-      paintOutlines(ribCx, base);
-    } else {
-      if (outlineDirty) renderOutlineCache();
-      ribCx.globalAlpha = base;
-      ribCx.drawImage(outlineCv, 0, 0, W, H);
-      ribCx.globalAlpha = 1;
-    }
+  /* MAP underlay: NO crossfade — dialing to RANK zooms the whole outline
+     plane into the focal badge (non-focal states exit the frame
+     geometrically). At rest in MAP the cached bitmap is blitted; in flight
+     (knob scrub, camera pan) the morph paints live. */
+  var lt = S.layout;
+  if (lt < 0.02 && camSettled) {
+    if (outlineDirty) renderOutlineCache();
+    ribCx.drawImage(outlineCv, 0, 0, W, H);
+  } else {
+    paintOutlinesMorph(ribCx, lt, hub);
+  }
+  if (lt < 0.5) {
     /* flow-switch hover: this direction's partners pulse gently brighter */
     var pdt = (perfNow - pulseT0) / 1000;
     if (pdt < 1.8 && mapProj) {
       var env = Math.sin(Math.min(1, pdt / 1.8) * Math.PI);
       var wave = 0.5 + 0.5 * Math.sin(pdt * Math.PI * 3.33);
-      var pa = 0.35 * env * wave * base;
+      var pa = 0.35 * env * wave * (1 - lt);
       if (pa > 0.01) {
+        /* SAME blended projector as the underlay — the pulsing rings must sit
+           exactly on their outlines mid-scrub, never at raw map positions */
+        var pproj = morphProj(lt, hub);
         links.forEach(function (l) {
           var ring = OUTLINES[l.name]; if (!ring) return;
           ribCx.beginPath();
           for (var i = 0; i < ring.length; i++) {
-            var p = mapProj(ring[i][0], ring[i][1]);
+            var p = pproj(ring[i][0], ring[i][1]);
             i ? ribCx.lineTo(p[0], p[1]) : ribCx.moveTo(p[0], p[1]);
           }
           ribCx.closePath();
@@ -690,7 +829,6 @@ function drawRibbons(staticMode) {
       }
     }
   }
-  if (S.layout > 0.5) drawFocalBadge(hub, (S.layout - 0.5) * 2);
 
   /* halo ring */
   if (sceneInfo.residual > 0) {
@@ -799,7 +937,7 @@ function rebuildLabels() {
   if (sceneInfo.residual > 0) {
     var el = document.createElement("div");
     el.className = "nl"; el.id = "haloLabel";
-    el.innerHTML = '<span class="full" style="opacity:1">other states (combined) ' +
+    el.innerHTML = '<span class="full" style="opacity:1">the drift — other states (combined) ' +
       (S.dir === "in" ? "send " : "receive ") + fmtInt(sceneInfo.residual) + "/yr</span>";
     labelHost.appendChild(el); labelEls["__halo"] = el;
   }
@@ -811,7 +949,14 @@ function placeLabels() {
   Object.keys(labelEls).forEach(function (name) {
     var el = labelEls[name];
     if (name === "__halo") {
-      if (hub) el.style.transform = "translate3d(" + hub.sx.v + "px," + Math.min(H - 225, hub.sy.v + haloR + 10) + "px,0) translate(-50%,-50%)";
+      /* clamp above the MEASURED dock (it wraps taller on phones) AND into the
+         viewport horizontally — in RANK the hub sits far left and the centered
+         caption would otherwise run off-screen */
+      if (hub) {
+        if (!el._hw) el._hw = el.offsetWidth / 2 + 8;
+        var hlx = Math.max(el._hw, Math.min(W - el._hw, hub.sx.v));
+        el.style.transform = "translate3d(" + hlx + "px," + Math.min(H - wsBot - 10, hub.sy.v + haloR + 10) + "px,0) translate(-50%,-50%)";
+      }
       return;
     }
     var n = nodes[name]; if (!n) return;
@@ -887,16 +1032,27 @@ function updateChrome() {
 
   var flooredN = links.filter(function (l) { return l.floored; }).length;
   var shownK = S.motion ? S.autoK : staticK();   /* static mode discloses its own density */
-  legend.innerHTML = "<b>1 dot ≈ " + fmtInt(shownK) + " shipments/yr</b> · 1 loop ≈ 1 modeled year" +
-    (shownK !== S.K ? ' · <span style="color:#d8b53f">auto-adjusted for density</span>' : "") +
-    "<br>annual means, not live tracking" +
-    (S.dir === "out" ? " · orbit dot ≈ 1% staying in-state" : " · orbit dot ≈ 1% arriving from in-state") +
+  /* the encoding-detail tail collapses behind a tap on phones (CSS .lgx);
+     the live dot scale, governor note and "not live tracking" never collapse */
+  var lgx = (S.dir === "out" ? " · orbit dot ≈ 1% staying in-state" : " · orbit dot ≈ 1% arriving from in-state") +
     (S.cat === "cattle" && S.dir === "out" && R.d && typeof R.d.beef_pct === "number"
       ? "<br>dot color = commodity mix: " + R.d.beef_pct + "% beef · " + R.d.dairy_pct + "% dairy" : "") +
     (FX && (S.cat === "cattle" || S.cat === "swine") && links.some(function (l) { return l.cv > 0; })
       ? "<br>stream steadiness ∝ across-network consistency (" +
-        fmtInt(S.cat === "swine" ? FX.nets.swine : FX.nets.cattle) + " nets)" : "") +
-    (flooredN ? "<br>streams shown for partners ≥" + FLOOR_PCT + "% · all " + links.length + " ribbons drawn" : "");
+        fmtInt(S.cat === "swine" ? FX.nets.swine : FX.nets.cattle) + " nets)" : "");
+  /* the floored-partners line stays OUTSIDE the collapsible tail: a floored
+     ribbon draws but emits no dots, so without this line the always-visible
+     dot scale would invite reading those corridors as ~0/yr (and the About
+     sheet promises it is "stated in the legend when active") */
+  legend.innerHTML = "<b>1 dot ≈ " + fmtInt(shownK) + " shipments/yr</b> · 1 loop ≈ 1 modeled year" +
+    /* playback disclosure only while motion runs — a frozen static scene has
+       no playback, so claiming a rate there would be a false disclosure */
+    (S.motion && S.speed !== 1 ? " · <b>" + (Math.round(S.speed * 100) / 100) + "× playback</b>" : "") +
+    (shownK !== S.K ? ' · <span style="color:#d8b53f">auto-adjusted for density</span>' : "") +
+    "<br>annual means, not live tracking" +
+    (flooredN ? "<br>streams shown for partners ≥" + FLOOR_PCT + "% · all " + links.length + " ribbons drawn" : "") +
+    '<span class="lgx">' + lgx + '</span> <span class="lgmore" role="button" tabindex="0" aria-expanded="' +
+    (legend.classList.contains("x") ? "true" : "false") + '" aria-label="Toggle the full encoding key"></span>';
 
   updateSeasonBars();
   var d = R.d, h = "";
@@ -915,11 +1071,15 @@ function updateChrome() {
 }
 
 /* ---------------- frame loop + governor ---------------- */
-var perfNow = 0, lastT = 0, slowFrames = 0, degradeStep = 0, settleTimer = 0, rafId = null;
+var perfNow = 0, dataNow = 0, lastT = 0, slowFrames = 0, degradeStep = 0, settleTimer = 0, rafId = null;
 function frame(t) {
   rafId = requestAnimationFrame(frame);
   if (!lastT) lastT = t;
   var dt = Math.min(0.05, (t - lastT) / 1000); lastT = t; perfNow = t;
+  /* DATA time runs at the playback rate; UI physics (springs, camera,
+     label settles) stay real-time so morphs never feel sluggish at 0.25× */
+  var dtS = dt * S.speed;
+  dataNow += dtS * 1000;
 
   /* governor ladder: 60 consecutive >22ms frames → degrade + always update legend */
   if (dt > 0.022) { if (++slowFrames >= 60) { degrade(); slowFrames = 0; } } else slowFrames = 0;
@@ -939,7 +1099,7 @@ function frame(t) {
 
   /* orbit: clockwise = outgoing, counter-clockwise = inbound; on a flip the
      dots decelerate through zero, realign, and spin the other way */
-  stepOrbit(dt);
+  stepOrbit(dtS);
   haloR = haloRS.step(dt);
   /* THE CAMERA: pan/zoom springs; while moving, the projection and every
      MAP-blended node target track it each frame */
@@ -979,12 +1139,12 @@ function frame(t) {
     if (allDone) rankStagger = null;
   }
   if (S.playYear && S.dir === "out") {
-    yearPhase = (yearPhase + dt / 12) % 1;
+    yearPhase = (yearPhase + dtS / 12) % 1;
     var qi = Math.floor(yearPhase * 4);
-    if (qi !== lastPlayQ) { lastPlayQ = qi; updateChrome(); }
+    if (qi !== lastPlayQ) { lastPlayQ = qi; updateChrome(); relayoutIfChromeMoved(); }
   }
-  emit(dt);
-  stepMotes(dt);
+  emit(dtS);
+  stepMotes(dtS, dt);
 
   drawRibbons(false);
   if (++clearCounter > 300) { moteCx.clearRect(0, 0, W, H); clearCounter = 0; }
@@ -999,7 +1159,7 @@ function degrade() {
   else if (degradeStep === 2) trailAlpha = 0.3;
   else {
     var i = K_STEPS.indexOf(S.autoK);
-    if (i >= 0 && i < K_STEPS.length - 1) { govK = K_STEPS[i + 1]; S.autoK = govK; updateChrome(); }
+    if (i >= 0 && i < K_STEPS.length - 1) { govK = K_STEPS[i + 1]; S.autoK = govK; updateChrome(); relayoutIfChromeMoved(); }
   }
 }
 function autoKUpdate() {
@@ -1072,7 +1232,17 @@ function freezeMotes() {
 function go(state, cat, dir, opts) {
   opts = opts || {};
   var changed = state !== S.state || cat !== S.cat || dir !== S.dir;
-  if (changed && !opts.instant) freezeMotes();
+  var moved = state !== S.state || dir !== S.dir;   /* anchors + camera change */
+  if (changed && !opts.instant) {
+    if (moved) {
+      /* travel is pure pan/zoom: frozen dots hanging in screen space during
+         a camera pan read as a crossfade, so travel hard-flushes instead */
+      motes.length = 0; fadingMotes.length = 0; haloAcc = 0;
+      if (moteCx) moteCx.clearRect(0, 0, W, H);
+    } else {
+      freezeMotes();                       /* same geography (category swap): grace fade */
+    }
+  }
   S.state = state; S.cat = cat; S.dir = dir;
   if (dir === "in") S.playYear = false;   /* no inbound quarters exist */
   store("drove:last", state);
@@ -1225,7 +1395,7 @@ document.getElementById("season").addEventListener("click", function (e) {
     freezeMotes();                         /* old rhythm fades, the year cycle ignites fresh */
     S.playYear = !S.playYear;
     if (S.playYear) { S.quarter = 0; yearPhase = 0; lastPlayQ = -1; }
-    autoKUpdate(); updateChrome(); syncControls();
+    autoKUpdate(); updateChrome(); relayoutIfChromeMoved(); syncControls();
     return;
   }
   var b = e.target.closest("button[data-q]"); if (!b) return;
@@ -1234,7 +1404,7 @@ document.getElementById("season").addEventListener("click", function (e) {
   S.playYear = false;
   S.quarter = q;
   autoKUpdate();                           /* peak quarters can push in-flight over the cap */
-  updateChrome(); syncControls();
+  updateChrome(); relayoutIfChromeMoved(); syncControls();
   rebuildLabels();                         /* labels show the pair's real quarterly number */
   if (!S.motion) staticRender();
 });
@@ -1270,6 +1440,27 @@ function updateSeasonBars() {
     b.title = pcts ? labels[q - 1] + " · " + pcts[q - 1] + "% of the modeled year" : "";
   });
 }
+
+/* mobile: expand/collapse the legend's encoding-detail tail; the chrome
+   height changes, so the workspace re-measures and the scene glides.
+   Handlers are DELEGATED on #legendChip (updateChrome rebuilds its innerHTML,
+   destroying any direct listener); no syncControls here — it would
+   scrollIntoView-yank the shelf for no state change. */
+function toggleLegendKey() {
+  var lg = document.getElementById("legendChip");
+  lg.classList.toggle("x");
+  var m = lg.querySelector(".lgmore");
+  if (m) m.setAttribute("aria-expanded", lg.classList.contains("x") ? "true" : "false");
+  layoutScene(false);
+}
+document.getElementById("legendChip").addEventListener("click", function (e) {
+  if (e.target.closest(".lgmore")) toggleLegendKey();
+});
+document.getElementById("legendChip").addEventListener("keydown", function (e) {
+  if ((e.key === "Enter" || e.key === " ") && e.target.closest(".lgmore")) {
+    e.preventDefault(); toggleLegendKey();
+  }
+});
 
 /* hover the direction switch → this direction's partner outlines pulse */
 (function () {
@@ -1332,6 +1523,11 @@ function closeLens() {
 document.getElementById("lensX").addEventListener("click", closeLens);
 document.getElementById("lensBtn").addEventListener("click", function () {
   S.lens ? closeLens() : openLens();
+});
+
+/* pointer tracking for the ripple (mouse hover and finger drags alike) */
+document.getElementById("stage").addEventListener("pointermove", function (e) {
+  ptrX = e.clientX; ptrY = e.clientY; ptrT = perfNow;
 });
 
 /* long-press anywhere on the stage = lens peek (slop-cancelled, single-pointer,
@@ -1436,6 +1632,59 @@ document.getElementById("stage").addEventListener("click", function (e) {
   if (!S.motion) staticRender();
 });
 
+/* ---------------- playback-speed rail ---------------- */
+/* pure playback: S.speed scales DATA time only (emission, journeys, orbit,
+   the year cycle). Proportions and the 1-loop ≈ 1-modeled-year mapping are
+   unchanged; the legend states the rate whenever it isn't 1× and the About
+   sheet declares the control. Hidden in static (reduced-motion) mode. */
+var syncSpeedRail = function () {};
+(function () {
+  var rail = document.getElementById("speedRail");
+  var thumb = rail.querySelector(".thumb"), tip = document.getElementById("speedTip");
+  var LO = Math.log(0.25), HI = Math.log(3);
+  function fmtSpd() { return (Math.round(S.speed * 100) / 100) + "×"; }
+  function place() {
+    var u = (Math.log(S.speed) - LO) / (HI - LO);
+    thumb.style.top = ((1 - u) * 100) + "%";
+    tip.textContent = fmtSpd();
+    rail.setAttribute("aria-valuenow", String(Math.round(S.speed * 100) / 100));
+    rail.setAttribute("aria-valuetext", fmtSpd() + " playback");
+  }
+  var noteT = 0;
+  function setSpeed(v) {
+    v = Math.max(0.25, Math.min(3, v));
+    if (Math.abs(v - 1) < 0.07) v = 1;     /* magnetic 1× detent */
+    if (v === S.speed) { place(); return; }
+    S.speed = v; place();
+    clearTimeout(noteT);                   /* debounced legend disclosure */
+    noteT = setTimeout(function () { updateChrome(); relayoutIfChromeMoved(); }, 250);
+  }
+  function fromY(clientY) {
+    var r = rail.getBoundingClientRect();
+    var u = 1 - Math.max(0, Math.min(1, (clientY - r.top) / r.height));
+    setSpeed(Math.exp(LO + u * (HI - LO)));
+  }
+  var dragging = false;
+  rail.addEventListener("pointerdown", function (e) {
+    dragging = true; rail.classList.add("live");
+    try { rail.setPointerCapture(e.pointerId); } catch (err) {}
+    fromY(e.clientY); e.preventDefault();
+  });
+  rail.addEventListener("pointermove", function (e) { if (dragging) fromY(e.clientY); });
+  function endDrag() { dragging = false; rail.classList.remove("live"); }
+  rail.addEventListener("pointerup", endDrag);
+  rail.addEventListener("pointercancel", endDrag);
+  rail.addEventListener("lostpointercapture", endDrag);
+  rail.addEventListener("dblclick", function () { setSpeed(1); });
+  rail.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowUp" || e.key === "ArrowRight") { setSpeed(S.speed * 1.25); e.preventDefault(); }
+    else if (e.key === "ArrowDown" || e.key === "ArrowLeft") { setSpeed(S.speed / 1.25); e.preventDefault(); }
+    else if (e.key === "Home") { setSpeed(1); e.preventDefault(); }
+  });
+  syncSpeedRail = function () { rail.classList.toggle("hidden", !S.motion); place(); };
+  place();
+})();
+
 /* ---------------- about sheet + framing + motion toggle ---------------- */
 var aboutSheet = document.getElementById("aboutSheet");
 document.getElementById("aboutBtn").addEventListener("click", function () { aboutSheet.classList.add("open"); aboutSheet.focus(); });
@@ -1448,8 +1697,11 @@ motionBtn.addEventListener("click", function () {
   S.motion = !S.motion;
   if (!S.motion) S.playYear = false;       /* the frozen scene shows the selected whole quarter */
   store("drove:motion", S.motion ? "on" : "off");
-  syncMotionBtn(); syncControls();
-  if (S.motion) { layoutScene(true); startLoop(); } else { updateChrome(); staticRender(); }
+  syncMotionBtn(); syncControls(); syncSpeedRail();
+  /* updateChrome on BOTH branches: the ≠1× playback disclosure must drop
+     when the scene freezes and reappear when motion resumes (layoutScene
+     with an unchanged scene key skips the chrome pass) */
+  if (S.motion) { layoutScene(true); updateChrome(); startLoop(); } else { updateChrome(); staticRender(); }
 });
 
 var framing = document.getElementById("framing");
@@ -1469,8 +1721,13 @@ window.DROVE = {
       reason: sceneInfo && sceneInfo.reason, links: links.length,
       caption: document.getElementById("capChip").textContent,
       legend: document.getElementById("legendChip").textContent,
+      /* textContent includes display:none .lgx text — these two see what the
+         user actually sees, so sweeps can catch collapsed-disclosure leaks */
+      legendVisible: document.getElementById("legendChip").innerText,
+      legendExpanded: document.getElementById("legendChip").classList.contains("x"),
       veil: document.getElementById("veil").classList.contains("on"),
-      residual: sceneInfo && sceneInfo.residual, autoK: S.autoK, motes: motes.length
+      residual: sceneInfo && sceneInfo.residual, autoK: S.autoK, motes: motes.length,
+      speed: S.speed
     };
   },
   STATES: STATE_LIST, CAPS: CAPS
@@ -1478,6 +1735,7 @@ window.DROVE = {
 
 /* ---------------- boot ---------------- */
 syncMotionBtn();
+syncSpeedRail();
 resize();
 go(S.state, S.cat, S.dir, { instant: true, snap: true });
 })();

@@ -45,7 +45,6 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 #lensLayer .lenscap{font-size:11px;color:#5f6b5c;padding:6px 4px 2px;text-align:center}
 #lensLayer .lensload{position:absolute;inset:8px;border-radius:8px;display:flex;align-items:center;
   justify-content:center;color:#5f6b5c;font-size:13px;background:#e9ece4}
-.fadeable{transition:opacity .5s ease}
 
 /* ---------------- labels ride nodes ---------------- */
 #labels{position:absolute;inset:0;pointer-events:none;overflow:hidden}
@@ -86,6 +85,11 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 #legendChip{font-size:10.5px;color:#8ba382;line-height:1.5;background:rgba(20,32,18,.75);
   border:1px solid #263722;border-radius:8px;padding:5px 8px}
 #legendChip b{color:#d8e6cf}
+/* on phones the encoding details collapse behind a tap (the live dot-scale +
+   "not live tracking" lines stay permanently visible); desktop always shows all */
+#legendChip .lgmore{display:none;color:#d8b53f;font-weight:600;cursor:pointer}
+#legendChip .lgmore::after{content:"▾ full key"}
+#legendChip.x .lgmore::after{content:"▴ less"}
 #aboutBtn{margin-top:6px;background:rgba(20,32,18,.85);border:1px solid #2c3d2a;color:#b7cbac;
   border-radius:999px;padding:5px 11px;font-size:11px;font-weight:600;cursor:pointer}
 #aboutBtn:active{background:#243422}
@@ -149,6 +153,12 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 #cats button.on{color:#fff}
 #cats button.na{color:#57654f;text-decoration:line-through}
 
+/* dockRight groups direction + commodity + season: pass-through on desktop
+   (display:contents — the dock flex line is unchanged), a right-aligned
+   column on phones so season sits directly above commodity, in plane with
+   the layout dial */
+#dockRight{display:contents}
+
 /* season arc + faucet column */
 #rightCol{margin-left:auto;flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
 #seasonWrap{position:relative}
@@ -186,6 +196,28 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
   transition:transform .34s cubic-bezier(.2,.7,.3,1)}
 #lensBtn.on .arr{transform:rotate(180deg)}
 
+
+/* playback-speed rail — thin, right-center, scrubbed up (faster) or down
+   (slower). PLAYBACK ONLY: proportions and the 1-loop ≈ 1-modeled-year
+   mapping are unchanged; the loop just takes more or less wall-clock time. */
+#speedRail{position:fixed;right:5px;top:50%;transform:translateY(-50%);height:148px;width:26px;
+  z-index:6;cursor:ns-resize;touch-action:none;opacity:.45;transition:opacity .2s ease;
+  display:flex;align-items:center;justify-content:center}
+#speedRail:hover,#speedRail:focus-visible,#speedRail.live{opacity:1}
+#speedRail .track{width:3px;height:100%;border-radius:2px;background:#33472e;position:relative}
+#speedRail .track::before,#speedRail .track::after{content:"";position:absolute;left:50%;
+  transform:translateX(-50%);border:4px solid transparent}
+#speedRail .track::before{top:-10px;border-bottom-color:#4a6345}
+#speedRail .track::after{bottom:-10px;border-top-color:#4a6345}
+#speedRail .thumb{position:absolute;left:50%;top:50%;width:11px;height:11px;border-radius:50%;
+  background:#cfe8c0;transform:translate(-50%,-50%);box-shadow:0 0 8px rgba(207,232,192,.5);
+  pointer-events:none}
+#speedRail .tip{position:absolute;right:24px;top:50%;transform:translateY(-50%);font-size:10px;
+  font-weight:700;color:#d8e6cf;background:rgba(10,18,10,.9);border:1px solid #2c3d2a;
+  border-radius:7px;padding:2px 6px;opacity:0;transition:opacity .2s;white-space:nowrap;
+  pointer-events:none}
+#speedRail:hover .tip,#speedRail:focus-visible .tip,#speedRail.live .tip{opacity:1}
+#speedRail.hidden{display:none}
 
 /* toast */
 #toast{position:absolute;left:50%;bottom:170px;transform:translateX(-50%);z-index:8;
@@ -240,6 +272,27 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 #framing button{margin-top:14px;width:100%;background:#3f5c39;border:0;color:#fff;border-radius:11px;
   padding:12px;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
 
+/* compact chrome (phones): the shelf moves to the VERY top and the data
+   boxes start below it; the dock wraps so season gets its own row above
+   commodity. drove.js measures all of this live (measureChrome), so the
+   canvas workspace and RANK rows follow wherever the chrome lands. */
+@media (max-width:640px){
+  #shelf{top:env(safe-area-inset-top);padding:8px 12px 6px}
+  #topbar{top:calc(48px + env(safe-area-inset-top));padding:6px 12px 6px}
+  #topbar>div:first-child{flex:1 1 auto;min-width:0}
+  #topRight{flex:0 1 auto;min-width:118px;max-width:46vw}
+  #legendChip{font-size:9.5px}
+  #legendChip:not(.x) .lgx{display:none}
+  #legendChip.x{max-height:34vh;overflow-y:auto}
+  /* visible text stays small; padding + negative margin grow the HIT box */
+  #legendChip .lgmore{display:inline-block;padding:10px 8px;margin:-8px -6px}
+  #labels.rank .nl:not(.hub) .full{font-size:9px}
+  /* season directly above commodity, both flush right, the whole cluster
+     bottom-anchored in plane with the layout dial */
+  #dockRight{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:flex-end;
+    gap:8px 10px;margin-left:auto}
+  #dockRight #rightCol{order:-1;flex-basis:100%;margin-left:0}
+}
 @media (max-width:520px){
   #cats{min-width:150px}
   #season button{padding:7px 6px}
@@ -253,14 +306,14 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 </head>
 <body>
 <div id="stage">
-  <canvas id="ribbons" class="fadeable"></canvas>
-  <canvas id="motes" class="fadeable"></canvas>
+  <canvas id="ribbons"></canvas>
+  <canvas id="motes"></canvas>
   <div id="lensLayer">
     <div class="lenshead"><h3 id="lensTitle">County lens</h3><button id="lensX" aria-label="Close lens">✕</button></div>
     <div class="well"><div class="lensload" id="lensLoad">loading county map…</div><img id="lensImg" alt=""><div class="lenscap" id="lensCap"></div></div>
   </div>
   <div id="vignette"></div>
-  <div id="labels" class="fadeable"></div>
+  <div id="labels"></div>
   <div id="tagChip"></div>
   <div id="veil"><div class="card"><b>Minimal modeled swine movement</b><span id="veilText"></span></div></div>
 </div>
@@ -286,32 +339,39 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
     <div class="ctl-label">layout</div>
     <button id="lensBtn"><svg class="glass" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.8 9.8 L14 14" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg> county <span class="arr">▸</span></button>
   </div>
-  <div id="flowWrap">
-    <div id="flow"><div class="cap">OUT</div></div>
-    <div class="ctl-label">direction</div>
-  </div>
-  <div id="catWrap">
-    <div id="cats">
-      <div class="pill"></div>
-      <button data-cat="cattle">Cattle</button><button data-cat="beef">Beef</button>
-      <button data-cat="dairy">Dairy</button><button data-cat="swine">Swine</button>
+  <div id="dockRight">
+    <div id="flowWrap">
+      <div id="flow"><div class="cap">OUT</div></div>
+      <div class="ctl-label">direction</div>
     </div>
-    <div class="ctl-label">commodity</div>
-  </div>
-  <div id="rightCol">
-    <div id="seasonWrap">
-      <div id="season">
-        <button id="playYear" title="Cycle the modeled year"><span class="qbar none"></span>▶</button>
-        <button data-q="0" class="on"><span class="qbar none"></span>YEAR</button>
-        <button data-q="1"><span class="qbar"></span>Q1</button>
-        <button data-q="2"><span class="qbar"></span>Q2</button>
-        <button data-q="3"><span class="qbar"></span>Q3</button>
-        <button data-q="4"><span class="qbar"></span>Q4</button>
+    <div id="catWrap">
+      <div id="cats">
+        <div class="pill"></div>
+        <button data-cat="cattle">Cattle</button><button data-cat="beef">Beef</button>
+        <button data-cat="dairy">Dairy</button><button data-cat="swine">Swine</button>
       </div>
-      <div id="seasonNote"></div>
-      <div class="ctl-label">season</div>
+      <div class="ctl-label">commodity</div>
+    </div>
+    <div id="rightCol">
+      <div id="seasonWrap">
+        <div id="season">
+          <button id="playYear" title="Cycle the modeled year"><span class="qbar none"></span>▶</button>
+          <button data-q="0" class="on"><span class="qbar none"></span>YEAR</button>
+          <button data-q="1"><span class="qbar"></span>Q1</button>
+          <button data-q="2"><span class="qbar"></span>Q2</button>
+          <button data-q="3"><span class="qbar"></span>Q3</button>
+          <button data-q="4"><span class="qbar"></span>Q4</button>
+        </div>
+        <div id="seasonNote"></div>
+        <div class="ctl-label">season</div>
+      </div>
     </div>
   </div>
+</div>
+
+<div id="speedRail" role="slider" tabindex="0" aria-orientation="vertical" aria-label="Playback speed"
+     aria-valuemin="0.25" aria-valuemax="3" aria-valuenow="1" aria-valuetext="1× playback">
+  <div class="track"></div><div class="thumb"></div><div class="tip" id="speedTip">1×</div>
 </div>
 
 <div id="toast"></div>
@@ -349,10 +409,20 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
         stated here). Inbound totals include in-state arrivals; the halo counts only the
         out-of-state remainder.</li>
       <li>The <b>outer halo</b> absorbs the residual: out-of-state flow beyond the 12 ranked
-        partners, labeled "other states (combined)" — so what you see totals honestly.</li>
+        partners, labeled "other states (combined)" — so what you see totals honestly. The faint
+        dust wandering between the hub and the halo ring is <b>the drift</b> — that residual flow
+        in motion, deliberately dimmed so the ranked streams stay the story. It is data (its rate
+        uses the same "1 dot ≈ K" scale), just unranked.</li>
+      <li>The thin rail on the right edge is a <b>playback-speed</b> control (0.25×–3×). It changes
+        only how fast the modeled year replays — every proportion, the dot scale, and the
+        "one loop ≈ one modeled year" mapping are unchanged (a faster loop is still one modeled
+        year). The live legend states the rate whenever it isn't 1×.</li>
       <li>The hub's slow breathing and shimmer are <b>ambient motion — they encode no data</b>.
         The orbit's spin direction is a convention only: clockwise for outgoing, counter-clockwise
-        for inbound. Arcs are schematic connectors between state centroids, not transport routes.</li>
+        for inbound. Arcs are schematic connectors between state centroids, not transport routes.
+        Dragging a finger (or moving the cursor) through the streams makes nearby dots shimmy
+        around it — <b>pure play, purely visual</b>: their route, timing, size and color are
+        untouched.</li>
     </ul>
     <h3>Directions &amp; seasons</h3>
     <ul>
